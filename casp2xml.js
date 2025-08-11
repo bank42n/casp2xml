@@ -42,7 +42,7 @@ const argv = yargs(hideBin(process.argv))
     alias: 'i',
     description: 'The instance key (hex) for the CAS Part display icon.',
     type: 'string',
-    default: '6758FFA2CA18A81B'
+    default: '0000000000000000'
   })
   .option('subtype', {
       alias: 's',
@@ -111,7 +111,8 @@ function slugify(text) {
  */
 function cleanDisplayName(filename, creatorName) {
     const base = path.basename(filename, '.package');
-    const creatorPattern = new RegExp(`\\s+by\\s+${creatorName}$`, 'i');
+    // Remove "by <creatorName>" from anywhere in the string (not just the end), case-insensitive
+    const creatorPattern = new RegExp(`\\s*by\\s*${creatorName}\\s*`, 'i');
     return base.replace(creatorPattern, '').trim().replace(/_/g, ' ');
 }
 

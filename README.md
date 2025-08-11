@@ -21,14 +21,9 @@ You must have [Node.js](https://nodejs.org/) (version 12 or higher is recommende
 You can install `casp2xml` globally via npm:
 
 ```bash
-npm install -g casp2xml
+npm install -g .
 ```
 
-Alternatively, if you've downloaded the project, navigate to the project folder and run the command:
-
-```bash
-npm install
-```
 
 ## 🚀 Usage
 

@@ -7,15 +7,15 @@
     "casp2xml": "./casp2xml.js"
   },
   "scripts": {
-    "build": "pkg ."
-  },
-  "pkg": {
-    "targets": [ "node18-win-x64" ],
-    "outputPath": "dist"
+    "build": "pkg casp2xml.js --targets node18-win-x64 -o dist/casp2xml-win.exe && bestzip dist/casp2xml-win.zip dist/casp2xml-win.exe"
   },
   "dependencies": {
     "@s4tk/hashing": "^0.2.1",
     "@s4tk/models": "^0.6.14",
     "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "bestzip": "^2.2.1",
+    "pkg": "^5.8.1"
   }
 }

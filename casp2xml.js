@@ -9,7 +9,7 @@
 // If a type cannot be determined, the script will abort.
 //
 // Author: BANK42n
-// Version: 2.5.0
+// Version: 2.5.1
 //
 
 // Import necessary Node.js modules

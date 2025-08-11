@@ -4,11 +4,12 @@
 // This script reads all Sims 4 .package files from an 'input' directory,
 // extracts the instance keys of all CAS Part (CASP) resources, and
 // generates a single, dynamically named XML snippet tuning file in the
-// 'output' directory. The XML structure is customized based on keywords
-// in the package filename. Configuration can be provided via command-line arguments.
+// 'output' directory. The XML structure is determined by keywords
+// in the package filename, but can be overridden for all parts with an argument.
+// If a type cannot be determined, the script will abort.
 //
 // Author: BANK42n
-// Version: 2.1.0
+// Version: 2.5.0
 //
 
 // Import necessary Node.js modules
@@ -30,7 +31,7 @@ const argv = yargs(hideBin(process.argv))
     alias: 'c',
     description: 'Your creator name.',
     type: 'string',
-    default: 'CreatorName'
+    default: 'YourCreatorName'
   })
   .option('basename', {
     alias: 'b',
@@ -41,13 +42,19 @@ const argv = yargs(hideBin(process.argv))
     alias: 'i',
     description: 'The instance key (hex) for the CAS Part display icon.',
     type: 'string',
-    default: '0000000000000000'
+    default: '6758FFA2CA18A81B'
   })
   .option('subtype', {
       alias: 's',
       description: 'Override automatic detection and set a specific CAS part subtype.',
       type: 'string',
       choices: ['HUMAN', 'ALIEN', 'VAMPIRE', 'MERMAID', 'WEREWOLF', 'FAIRY']
+  })
+  .option('parttype', {
+      alias: 'p',
+      description: 'Override filename detection and set a specific CAS part type for ALL parts.',
+      type: 'string',
+      choices: ['PENIS_HARD_MALE', 'PENIS_SOFT_MALE', 'BODY_TOP_MALE', 'BODY_BOTTOM_MALE']
   })
   .option('input', {
       alias: 'in',
@@ -63,7 +70,7 @@ const argv = yargs(hideBin(process.argv))
   })
   .usage('Usage: node $0 [options]')
   .example('node $0', 'Run with default settings.')
-  .example('node $0 -c "MyName" -s "VAMPIRE"', 'Run with custom creator and override subtype.')
+  .example('node $0 -p "PENIS_SOFT_MALE"', 'Force all parts to be PENIS_SOFT_MALE type.')
   .help()
   .alias('help', 'h')
   .argv;
@@ -142,9 +149,8 @@ function ensureDirectoryExists(dirPath) {
 function main() {
   console.log("Starting CAS Part extractor script...");
   console.log(`Configuration: Creator='${CREATOR_NAME}', Icon='${CAS_PART_ICON}'`);
-  if (argv.subtype) {
-    console.log(`Subtype Override: '${argv.subtype}'`);
-  }
+  if (argv.subtype) console.log(`Subtype Override: '${argv.subtype}'`);
+  if (argv.parttype) console.log(`Part Type Override: '${argv.parttype}'`);
   console.log(`Input Directory: '${INPUT_DIR}'`);
   console.log(`Output Directory: '${OUTPUT_DIR}'`);
 
@@ -238,11 +244,10 @@ function main() {
   const dynamicFilename = `${TYPE_ID_HEX}!${GROUP_ID_HEX}!${tuningIdHex}.${CREATOR_NAME}_${slugifiedBaseName}.SnippetTuning.xml`;
   
   // 7. Create the list of CAS parts for the XML
+  const unresolvedParts = []; // Array to hold parts that cannot be resolved.
   const casPartsListXml = Array.from(casPartsData.entries()).map(([id, filename]) => {
-    const lowerCaseFilename = filename.toLowerCase();
     const displayName = cleanDisplayName(filename, CREATOR_NAME);
     
-    // Determine the subtype tag
     let subtypeTag = '';
     const detectedSubtype = argv.subtype || detectSubtype(filename);
     if (detectedSubtype) {
@@ -250,7 +255,56 @@ function main() {
       <T n="cas_part_subtype">${detectedSubtype}</T>`;
     }
 
+    // Priority 1: Use --parttype argument if provided.
+    if (argv.parttype) {
+      const partType = argv.parttype;
+      if (partType === 'PENIS_HARD_MALE') {
+        return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">PENIS_HARD_MALE</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+      <U n="penis_sliders">
+        <T n="length_slider_low">0</T>
+        <T n="length_slider_high">0</T>
+        <T n="girth_slider_low">0</T>
+        <T n="girth_slider_high">0</T>
+      </U>
+    </U>`;
+      } else if (partType === 'PENIS_SOFT_MALE') {
+        return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">PENIS_SOFT_MALE</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+    </U>`;
+      } else if (partType === 'BODY_TOP_MALE') {
+        return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">BODY_TOP_MALE</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+    </U>`;
+      } else if (partType === 'BODY_BOTTOM_MALE') {
+        return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">BODY_BOTTOM_MALE</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+    </U>`;
+      }
+    }
 
+    // Priority 2: Fallback to filename detection if --parttype is not used.
+    const lowerCaseFilename = filename.toLowerCase();
     if (lowerCaseFilename.includes('erect')) {
       return `
     <U>
@@ -282,7 +336,7 @@ function main() {
       <T n="cas_part_author">${CREATOR_NAME}</T>
       <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
       <T n="cas_part_type">BODY_TOP_MALE</T>
-      <T n="cas_part_id">${id}</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
     } else if (lowerCaseFilename.includes('bottom')) {
       return `
@@ -291,21 +345,29 @@ function main() {
       <T n="cas_part_author">${CREATOR_NAME}</T>
       <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
       <T n="cas_part_type">BODY_BOTTOM_MALE</T>
-      <T n="cas_part_id">${id}</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
     } else {
-      return `
-    <U>
-      <T n="cas_part_id">${id}</T>
-      <!-- 
-        NOTE: Could not determine type from filename. Please fill in the details manually.
-        Filename: ${filename}
-      -->
-    </U>`;
+      // If no type is found, add to unresolved list and return null
+      unresolvedParts.push(filename);
+      return null;
     }
-  }).join('');
+  }).filter(part => part !== null).join(''); // Filter out nulls before joining
 
-  // 8. Assemble the final XML content
+  // 8. VALIDATION STEP: Check if there were any unresolved parts. If so, report and exit.
+  if (unresolvedParts.length > 0) {
+    console.error('\n====================[ ATTENTION REQUIRED ]====================');
+    console.error(`\n❌ ERROR: Could not determine CAS Part Type for ${unresolvedParts.length} file(s).`);
+    console.error('Please rename the file(s) to include a supported keyword (erect, soft, top, bottom),');
+    console.error('or use the --parttype argument to force a type for all parts.');
+    console.error('\nProblematic file(s):');
+    unresolvedParts.forEach(file => console.error(`  - ${file}`));
+    console.error('\nXML file was NOT created due to the errors above.');
+    console.error('==============================================================');
+    return; // Abort without writing the file
+  }
+
+  // 9. Assemble the final XML content
   const xmlContent = `<?xml version="1.0" encoding="utf-8"?>
 <I c="WickedWhimsCASPartsPackage" i="snippet" m="wickedwhims.main.cas_parts.cas_parts_tuning" n="${tuningName}" s="${tuningIdDecimal}">
   <T n="wickedwhims_cas_parts">1</T>
@@ -314,7 +376,7 @@ function main() {
 </I>
 `;
 
-  // 9. Write the final XML file
+  // 10. Write the final XML file
   const outputFilePath = path.join(OUTPUT_DIR, dynamicFilename);
   try {
     fs.writeFileSync(outputFilePath, xmlContent);

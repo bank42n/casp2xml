@@ -73,6 +73,7 @@ You can view all available options by using the `casp2xml --help` command.
 | `--creator` | `-c` | Your creator name. | `CreatorName` |
 | `--basename` | `-b` | The base name for the snippet collection. If unset, it's generated from the first package file. | (Generated) |
 | `--icon` | `-i` | The instance key (hex) for the CAS Part display icon. Icon must be DDS BC1 without mipmap at resolution of 100 x 100 px | `0000000000000000` |
+| `--parttype` | `-p` | Override automatic detection and set a specific CAS part type (Supported is `PENIS_HARD_MALE', 'PENIS_SOFT_MALE', 'BODY_TOP_MALE', 'BODY_BOTTOM_MALE`). | (Auto-detected) |
 | `--subtype` | `-s` | Override automatic detection and set a specific CAS part subtype (e.g., `HUMAN`, `VAMPIRE`, `WEREWOLF`). | (Auto-detected) |
 | `--input` | `-in` | The directory containing your `.package` files. | `.` (current directory) |
 | `--output` | `-out` | The directory where the generated XML file will be saved. | `.` (current directory) |

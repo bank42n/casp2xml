@@ -1,13 +1,13 @@
 {
   "name": "casp2xml",
-  "version": "1.9.0",
+  "version": "2.5.1",
   "description": "A tool to generate CAS Part snippets.",
   "main": "casp2xml.js",
   "bin": {
     "casp2xml": "./casp2xml.js"
   },
   "scripts": {
-    "build": "pkg casp2xml.js --targets node18-win-x64 -o dist/casp2xml-win.exe && bestzip dist/casp2xml-win.zip dist/casp2xml-win.exe"
+    "build": "pkg casp2xml.js --targets node18-win-x64 -o dist/casp2xml.exe && bestzip dist/casp2xml.zip dist/casp2xml.exe"
   },
   "dependencies": {
     "@s4tk/hashing": "^0.2.1",

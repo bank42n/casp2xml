@@ -119,7 +119,7 @@ function cleanDisplayName(filename, creatorName) {
 /**
  * Automatically detects the CAS part subtype from the filename.
  * @param {string} filename The filename to check.
- * @returns {string|null} The detected subtype in uppercase, or null if not found.
+ * @returns {string|null} The detected subtype in uppercase, or default to HUMAN if not found.
  */
 function detectSubtype(filename) {
     const lowerCaseFilename = filename.toLowerCase();
@@ -129,7 +129,7 @@ function detectSubtype(filename) {
             return subtype;
         }
     }
-    return null;
+    return 'HUMAN';
 }
 
 
@@ -322,6 +322,15 @@ function main() {
       </U>
     </U>`;
     } else if (lowerCaseFilename.includes('soft')) {
+      return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">PENIS_SOFT_MALE</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+    </U>`;
+    } else if (lowerCaseFilename.includes('semi')) {
       return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>

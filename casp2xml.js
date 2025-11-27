@@ -309,11 +309,11 @@ function main() {
         const shortId = lengthsData.short;
         const mediumId = lengthsData.medium;
         const longId = lengthsData.long;
-        if (!shortId || !mediumId || !longId) {
-          console.error(`Missing length data for style ${style} subtype ${subtype}`);
+        if (!shortId && !mediumId && !longId) {
+          console.error(`No length data for style ${style} subtype ${subtype}, File name should contain short, medium, or long. Skipping.`);
           return;
         }
-        const ids = [shortId, mediumId, longId].join(',');
+        const ids = [shortId, mediumId, longId].filter(id => id !== null).join(',');
         const displayName = `${style}${lengthsData.displaySuffix}`;
         let partType = argv.parttype;
         if (!partType) {

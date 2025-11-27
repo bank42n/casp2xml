@@ -277,9 +277,9 @@ function main() {
         styleGroups.set(style, new Map());
       }
       const colorMap = styleGroups.get(style);
-      parts.forEach(({id, name}) => {
-        // Extract color from name using regex _COLOR_
-        const colorMatch = name.match(/_COLOR_([A-Z_]+)/);
+      parts.forEach(({id, name}, idx) => {
+        // Extract color from name using regex _COLOR_[color] or _[color]_ followed by non-letter or end
+        const colorMatch = name.match(/.*_(?:COLOR_)?([A-Z_]+)([^A-Z]|$)/);
         let subtype = 'CUSTOM';
         let displaySuffix = '';
         if (colorMatch) {

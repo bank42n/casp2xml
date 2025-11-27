@@ -136,14 +136,14 @@ function main() {
           const decompressedStr = decompressed.toString('utf8', 2, endIndex);
           console.log('First part of decompressed data (from offset 2 to null or 200):', JSON.stringify(decompressedStr));
           // Extract name: match the specific pattern
-          const nameMatch = nameStr.match(/BANK42n_.*_COLOR_[A-Z_]+/);
+          const nameMatch = nameStr.match(/BANK42n_.*_(?:COLOR_)?[A-Z_]+/);
           console.log('nameMatch:', nameMatch);
           if (nameMatch) {
             console.log('Extracted name:', nameMatch[0]);
           } else {
             console.log('No name found in string data.');
             // Try simpler
-            const colorMatch = nameStr.match(/COLOR_[A-Z_]+/);
+            const colorMatch = nameStr.match(/.*_(?:COLOR_)?([A-Z_]+)([^A-Z]|$)/);
             if (colorMatch) {
               console.log('Found color:', colorMatch[0]);
             }

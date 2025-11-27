@@ -15,6 +15,7 @@
 // Import necessary Node.js modules
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 
 // Import necessary modules from the Sims 4 Toolkit library
 // Make sure to install them first by running:
@@ -54,7 +55,7 @@ const argv = yargs(hideBin(process.argv))
       alias: 'p',
       description: 'Override filename detection and set a specific CAS part type for ALL parts.',
       type: 'string',
-      choices: ['PENIS_HARD_MALE', 'PENIS_SOFT_MALE', 'BODY_TOP_MALE', 'BODY_BOTTOM_MALE']
+      choices: ['PENIS_HARD_MALE', 'PENIS_SOFT_MALE', 'BODY_TOP_MALE', 'BODY_BOTTOM_MALE', 'PUBIC_HAIR_MALE', 'PUBIC_HAIR_FEMALE']
   })
   .option('input', {
       alias: 'in',
@@ -83,6 +84,10 @@ const CREATOR_NAME = argv.creator;
 const CAS_PART_ICON = `00B2D882:00000000:${argv.icon.toUpperCase().padStart(16, '0')}`;
 const INPUT_DIR = path.resolve(process.cwd(), argv.input);
 const OUTPUT_DIR = path.resolve(process.cwd(), argv.output);
+
+// Pubic hair constants
+const PUBIC_HAIR_LENGTHS = ['short', 'medium', 'long'];
+const PUBIC_HAIR_COLORS = ['BLACK', 'BLONDE', 'BROWN', 'LIGHT_BROWN', 'DARK_BROWN', 'AUBURN', 'RED', 'GRAY', 'WHITE', 'DIRTY_BLONDE', 'ORANGE'];
 
 
 // --- SCRIPT LOGIC ---
@@ -115,23 +120,6 @@ function cleanDisplayName(filename, creatorName) {
     const creatorPattern = new RegExp(`\\s*by\\s*${creatorName}\\s*`, 'i');
     return base.replace(creatorPattern, '').trim().replace(/_/g, ' ');
 }
-
-/**
- * Automatically detects the CAS part subtype from the filename.
- * @param {string} filename The filename to check.
- * @returns {string|null} The detected subtype in uppercase, or default to HUMAN if not found.
- */
-function detectSubtype(filename) {
-    const lowerCaseFilename = filename.toLowerCase();
-    const subtypes = ['HUMAN', 'ALIEN', 'VAMPIRE', 'MERMAID', 'WEREWOLF', 'FAIRY'];
-    for (const subtype of subtypes) {
-        if (lowerCaseFilename.includes(subtype.toLowerCase())) {
-            return subtype;
-        }
-    }
-    return 'HUMAN';
-}
-
 
 /**
  * Ensures that a directory exists. If it doesn't, it's created.
@@ -178,6 +166,10 @@ function main() {
 
   console.log(`Found ${packageFiles.length} package file(s) to process.`);
   
+  // Check if this is pubic hair processing
+  const isPubicHair = INPUT_DIR.toLowerCase().includes('pubic_hair') || packageFiles.some(f => f.toLowerCase().includes('pubic'));
+  console.log(`Pubic hair mode: ${isPubicHair ? 'Enabled' : 'Disabled'}`);
+  
   // 3. Determine the Snippet Base Name
   let SNIPPET_BASE_NAME;
   if (argv.basename) {
@@ -191,7 +183,7 @@ function main() {
   }
 
   // 4. Extract CAS Part data from all package files
-  const casPartsData = new Map(); // Use a Map to store {id -> filename}
+  const casPartsData = new Map(); // Use a Map to store {filename -> array of ids}
 
   packageFiles.forEach(filename => {
     const filepath = path.join(INPUT_DIR, filename);
@@ -208,11 +200,22 @@ function main() {
 
       if (caspEntries.length > 0) {
         console.log(`Found ${caspEntries.length} CAS Part(s) in this file.`);
+        const parts = [];
         caspEntries.forEach(entry => {
-          const instanceId = entry.key.instance.toString();
-          casPartsData.set(instanceId, filename);
-          console.log(`  > Extracted Instance ID: ${instanceId}`);
+          const id = entry.key.instance.toString();
+          // Extract name from decompressed buffer
+          try {
+            const compressedBuffer = entry.value.bufferCache.buffer;
+            const decompressed = zlib.inflateSync(compressedBuffer);
+            // Name is in UTF-16LE starting at offset 12
+            const name = decompressed.toString('utf16le', 12).split('\0')[0];
+            parts.push({id, name});
+          } catch (e) {
+            console.error(`Failed to extract name for CASP ${id}: ${e.message}`);
+            parts.push({id, name: 'UNKNOWN'});
+          }
         });
+        casPartsData.set(filename, parts);
       } else {
         console.log("No CAS Parts found in this file.");
       }
@@ -224,12 +227,14 @@ function main() {
   });
 
   // 5. Generate the XML snippet if any CAS parts were found
-  if (casPartsData.size === 0) {
+  let totalIds = 0;
+  casPartsData.forEach(parts => totalIds += parts.length);
+  if (totalIds === 0) {
     console.log("\nNo CAS Parts were found in any of the files. Exiting.");
     return;
   }
 
-  console.log(`\nTotal unique CAS Part instances found: ${casPartsData.size}`);
+  console.log(`\nTotal unique CAS Part instances found: ${totalIds}`);
 
   // 6. Generate dynamic tuning name, ID, and filename
   const slugifiedBaseName = slugify(SNIPPET_BASE_NAME);
@@ -245,22 +250,115 @@ function main() {
   const dynamicFilename = `${TYPE_ID_HEX}!${GROUP_ID_HEX}!${tuningIdHex}.${CREATOR_NAME}_${slugifiedBaseName}.SnippetTuning.xml`;
   
   // 7. Create the list of CAS parts for the XML
-  const unresolvedParts = []; // Array to hold parts that cannot be resolved.
-  const casPartsListXml = Array.from(casPartsData.entries()).map(([id, filename]) => {
-    const displayName = cleanDisplayName(filename, CREATOR_NAME);
-    
-    let subtypeTag = '';
-    const detectedSubtype = argv.subtype || detectSubtype(filename);
-    if (detectedSubtype) {
-        subtypeTag = `
-      <T n="cas_part_subtype">${detectedSubtype}</T>`;
-    }
+  let casPartsListXml = '';
+  if (isPubicHair) {
+    // Process pubic hair grouping
+    const styleGroups = new Map(); // style -> color -> {short: id, medium: id, long: id}
 
-    // Priority 1: Use --parttype argument if provided.
-    if (argv.parttype) {
-      const partType = argv.parttype;
-      if (partType === 'PENIS_HARD_MALE') {
-        return `
+    casPartsData.forEach((parts, filename) => {
+      const base = path.basename(filename, '.package');
+      const creatorPattern = new RegExp(`\\s*by\\s*${CREATOR_NAME}\\s*`, 'i');
+      const withoutCreator = base.replace(creatorPattern, '').trim();
+      // Find and remove length
+      let style = withoutCreator;
+      let lengthIndex = -1;
+      PUBIC_HAIR_LENGTHS.forEach((len, idx) => {
+        const lenPattern = new RegExp(`\\b${len}\\b`, 'i');
+        if (lenPattern.test(style)) {
+          style = style.replace(lenPattern, '').trim();
+          lengthIndex = idx;
+        }
+      });
+      if (lengthIndex === -1) {
+        console.error(`Could not determine length for ${filename}. Skipping.`);
+        return;
+      }
+      if (!styleGroups.has(style)) {
+        styleGroups.set(style, new Map());
+      }
+      const colorMap = styleGroups.get(style);
+      parts.forEach(({id, name}) => {
+        // Extract color from name using regex _COLOR_
+        const colorMatch = name.match(/_COLOR_([A-Z_]+)/);
+        let subtype = 'CUSTOM';
+        let displaySuffix = '';
+        if (colorMatch) {
+          const foundColor = colorMatch[1];
+          if (PUBIC_HAIR_COLORS.includes(foundColor)) {
+            subtype = foundColor;
+            const beautifiedColor = foundColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+            displaySuffix = ` ${beautifiedColor}`;
+            } else {
+            subtype = 'CUSTOM';
+            const beautifiedColor = foundColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+            displaySuffix = ` ${beautifiedColor}`;
+          }
+        }
+        if (!colorMap.has(subtype)) {
+          colorMap.set(subtype, {short: null, medium: null, long: null, displaySuffix});
+        }
+        const lengthObj = colorMap.get(subtype);
+        lengthObj[PUBIC_HAIR_LENGTHS[lengthIndex]] = id;
+        lengthObj.displaySuffix = displaySuffix; // ensure it's set
+      });
+    });
+
+    // Now, generate XML
+    styleGroups.forEach((colorMap, style) => {
+      colorMap.forEach((lengthsData, subtype) => {
+        const shortId = lengthsData.short;
+        const mediumId = lengthsData.medium;
+        const longId = lengthsData.long;
+        if (!shortId || !mediumId || !longId) {
+          console.error(`Missing length data for style ${style} subtype ${subtype}`);
+          return;
+        }
+        const ids = [shortId, mediumId, longId].join(',');
+        const displayName = `${style}${lengthsData.displaySuffix}`;
+        let partType = argv.parttype;
+        if (!partType) {
+          // Detect male/female from filename or default to male
+          const hasMale = packageFiles.some(f => f.toLowerCase().includes('male'));
+          const hasFemale = packageFiles.some(f => f.toLowerCase().includes('female'));
+          partType = hasFemale && !hasMale ? 'PUBIC_HAIR_FEMALE' : 'PUBIC_HAIR_MALE';
+        }
+        casPartsListXml += `
+    <!-- Color Tag: ${subtype} (${lengthsData.displaySuffix.trim()}) - From CASP Name -->
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">${partType}</T>
+      <T n="cas_part_subtype">${subtype}</T>
+      <T n="cas_part_group">${style}</T>
+      <T n="cas_part_ids">${ids}</T>
+      <T n="has_strict_visibility">True</T>
+    </U>`;
+      });
+    });
+  } else {
+    // Original logic for non-pubic hair
+    const casPartsDataFlat = new Map();
+    casPartsData.forEach((ids, filename) => {
+      ids.forEach(id => casPartsDataFlat.set(id, filename));
+    });
+
+    const unresolvedParts = []; // Array to hold parts that cannot be resolved.
+    casPartsListXml = Array.from(casPartsDataFlat.entries()).map(([id, filename]) => {
+      const displayName = cleanDisplayName(filename, CREATOR_NAME);
+      
+      let subtypeTag = '';
+      const detectedSubtype = argv.subtype || detectSubtype(filename);
+      if (detectedSubtype) {
+          subtypeTag = `
+      <T n="cas_part_subtype">${detectedSubtype}</T>`;
+      }
+
+      // Priority 1: Use --parttype argument if provided.
+      if (argv.parttype) {
+        const partType = argv.parttype;
+        if (partType === 'PENIS_HARD_MALE') {
+          return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -274,8 +372,8 @@ function main() {
         <T n="girth_slider_high">0</T>
       </U>
     </U>`;
-      } else if (partType === 'PENIS_SOFT_MALE') {
-        return `
+        } else if (partType === 'PENIS_SOFT_MALE') {
+          return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -283,8 +381,8 @@ function main() {
       <T n="cas_part_type">PENIS_SOFT_MALE</T>
       <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
-      } else if (partType === 'BODY_TOP_MALE') {
-        return `
+        } else if (partType === 'BODY_TOP_MALE') {
+          return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -292,8 +390,8 @@ function main() {
       <T n="cas_part_type">BODY_TOP_MALE</T>
       <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
-      } else if (partType === 'BODY_BOTTOM_MALE') {
-        return `
+        } else if (partType === 'BODY_BOTTOM_MALE') {
+          return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -301,13 +399,33 @@ function main() {
       <T n="cas_part_type">BODY_BOTTOM_MALE</T>
       <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
+        } else if (partType === 'PUBIC_HAIR_MALE') {
+          return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">PUBIC_HAIR_MALE</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+      <T n="has_strict_visibility">True</T>
+    </U>`;
+        } else if (partType === 'PUBIC_HAIR_FEMALE') {
+          return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">PUBIC_HAIR_FEMALE</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+      <T n="has_strict_visibility">True</T>
+    </U>`;
+        }
       }
-    }
 
-    // Priority 2: Fallback to filename detection if --parttype is not used.
-    const lowerCaseFilename = filename.toLowerCase();
-    if (lowerCaseFilename.includes('erect')) {
-      return `
+      // Priority 2: Fallback to filename detection if --parttype is not used.
+      const lowerCaseFilename = filename.toLowerCase();
+      if (lowerCaseFilename.includes('erect')) {
+        return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -321,8 +439,8 @@ function main() {
         <T n="girth_slider_high">0</T>
       </U>
     </U>`;
-    } else if (lowerCaseFilename.includes('soft')) {
-      return `
+      } else if (lowerCaseFilename.includes('soft')) {
+        return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -330,8 +448,8 @@ function main() {
       <T n="cas_part_type">PENIS_SOFT_MALE</T>
       <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
-    } else if (lowerCaseFilename.includes('semi')) {
-      return `
+      } else if (lowerCaseFilename.includes('semi')) {
+        return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -339,8 +457,8 @@ function main() {
       <T n="cas_part_type">PENIS_SOFT_MALE</T>
       <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
-    } else if (lowerCaseFilename.includes('top')) {
-      return `
+      } else if (lowerCaseFilename.includes('top')) {
+        return `
     <U>
       <T n="cas_part_raw_display_name">${displayName}</T>
       <T n="cas_part_author">${CREATOR_NAME}</T>
@@ -357,24 +475,37 @@ function main() {
       <T n="cas_part_type">BODY_BOTTOM_MALE</T>
       <T n="cas_part_id">${id}</T>${subtypeTag}
     </U>`;
+    } else if (lowerCaseFilename.includes('pubic')) {
+      const isFemale = lowerCaseFilename.includes('female');
+      const partType = isFemale ? 'PUBIC_HAIR_FEMALE' : 'PUBIC_HAIR_MALE';
+      return `
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">${partType}</T>
+      <T n="cas_part_id">${id}</T>${subtypeTag}
+      <T n="has_strict_visibility">True</T>
+    </U>`;
     } else {
-      // If no type is found, add to unresolved list and return null
-      unresolvedParts.push(filename);
-      return null;
-    }
-  }).filter(part => part !== null).join(''); // Filter out nulls before joining
+        // If no type is found, add to unresolved list and return null
+        unresolvedParts.push(filename);
+        return null;
+      }
+    }).filter(part => part !== null).join(''); // Filter out nulls before joining
 
-  // 8. VALIDATION STEP: Check if there were any unresolved parts. If so, report and exit.
-  if (unresolvedParts.length > 0) {
-    console.error('\n====================[ ATTENTION REQUIRED ]====================');
-    console.error(`\n❌ ERROR: Could not determine CAS Part Type for ${unresolvedParts.length} file(s).`);
-    console.error('Please rename the file(s) to include a supported keyword (erect, soft, top, bottom),');
-    console.error('or use the --parttype argument to force a type for all parts.');
-    console.error('\nProblematic file(s):');
-    unresolvedParts.forEach(file => console.error(`  - ${file}`));
-    console.error('\nXML file was NOT created due to the errors above.');
-    console.error('==============================================================');
-    return; // Abort without writing the file
+    // 8. VALIDATION STEP: Check if there were any unresolved parts. If so, report and exit.
+    if (unresolvedParts.length > 0) {
+      console.error('\n====================[ ATTENTION REQUIRED ]====================');
+      console.error(`\n❌ ERROR: Could not determine CAS Part Type for ${unresolvedParts.length} file(s).`);
+      console.error('Please rename the file(s) to include a supported keyword (erect, soft, top, bottom, pubic),');
+      console.error('or use the --parttype argument to force a type for all parts.');
+      console.error('\nProblematic file(s):');
+      unresolvedParts.forEach(file => console.error(`  - ${file}`));
+      console.error('\nXML file was NOT created due to the errors above.');
+      console.error('==============================================================');
+      return; // Abort without writing the file
+    }
   }
 
   // 9. Assemble the final XML content

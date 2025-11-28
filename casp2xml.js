@@ -253,12 +253,13 @@ function main() {
   let casPartsListXml = '';
   if (isPubicHair) {
     // Process pubic hair grouping
-    const styleGroups = new Map(); // style -> color -> {short: id, medium: id, long: id}
+    const styleGroups = new Map(); // group -> color -> {short: id, medium: id, long: id}
+    const groupToStyle = new Map(); // group -> style
 
     casPartsData.forEach((parts, filename) => {
       const base = path.basename(filename, '.package');
       const creatorPattern = new RegExp(`\\s*by\\s*${CREATOR_NAME}\\s*`, 'i');
-      const withoutCreator = base.replace(creatorPattern, '').trim();
+      let withoutCreator = base.replace(creatorPattern, '').trim();
       // Find and remove length
       let style = withoutCreator;
       let lengthIndex = -1;
@@ -273,10 +274,6 @@ function main() {
         console.error(`Could not determine length for ${filename}. Skipping.`);
         return;
       }
-      if (!styleGroups.has(style)) {
-        styleGroups.set(style, new Map());
-      }
-      const colorMap = styleGroups.get(style);
       parts.forEach(({id, name}, idx) => {
         // Extract color from name using regex _COLOR_[color] or _[color]_ followed by non-letter or end
         const colorMatch = name.match(/.*_(?:COLOR_)?([A-Z_]+)([^A-Z]|$)/);
@@ -294,6 +291,14 @@ function main() {
             displaySuffix = ` ${beautifiedColor}`;
           }
         }
+        const numberMatch = name.match(/_No_(\d+)/i);
+        const number = numberMatch ? numberMatch[1] : '';
+        let group = style.replace(/_/g, ' ') + (number ? ' No ' + number + displaySuffix : '');
+        if (!styleGroups.has(group)) {
+          styleGroups.set(group, new Map());
+        }
+        groupToStyle.set(group, style);
+        const colorMap = styleGroups.get(group);
         if (!colorMap.has(subtype)) {
           colorMap.set(subtype, {short: null, medium: null, long: null, displaySuffix});
         }
@@ -304,17 +309,20 @@ function main() {
     });
 
     // Now, generate XML
-    styleGroups.forEach((colorMap, style) => {
+    styleGroups.forEach((colorMap, group) => {
+      const style = groupToStyle.get(group);
       colorMap.forEach((lengthsData, subtype) => {
         const shortId = lengthsData.short;
         const mediumId = lengthsData.medium;
         const longId = lengthsData.long;
         if (!shortId && !mediumId && !longId) {
-          console.error(`No length data for style ${style} subtype ${subtype}, File name should contain short, medium, or long. Skipping.`);
+          console.error(`No length data for group ${group} subtype ${subtype}`);
           return;
         }
         const ids = [shortId, mediumId, longId].filter(id => id !== null).join(',');
-        const displayName = `${style}${lengthsData.displaySuffix}`;
+        let displayName = `${style}${lengthsData.displaySuffix}`;
+        displayName = cleanDisplayName(displayName, CREATOR_NAME) + ' by ' + CREATOR_NAME;
+
         let partType = argv.parttype;
         if (!partType) {
           // Detect male/female from filename or default to male
@@ -330,7 +338,7 @@ function main() {
       <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
       <T n="cas_part_type">${partType}</T>
       <T n="cas_part_subtype">${subtype}</T>
-      <T n="cas_part_group">${style}</T>
+      <T n="cas_part_group">${group}</T>
       <T n="cas_part_ids">${ids}</T>
       <T n="has_strict_visibility">True</T>
     </U>`;
@@ -509,7 +517,7 @@ function main() {
   }
 
   // 9. Assemble the final XML content
-  const xmlContent = `<?xml version="1.0" encoding="utf-8"?>
+  const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <I c="WickedWhimsCASPartsPackage" i="snippet" m="wickedwhims.main.cas_parts.cas_parts_tuning" n="${tuningName}" s="${tuningIdDecimal}">
   <T n="wickedwhims_cas_parts">1</T>
   <L n="cas_parts_list">${casPartsListXml}

@@ -63,6 +63,13 @@ const argv = yargs(hideBin(process.argv))
       type: 'string',
       default: '.'
   })
+  .option('pubic-hair-mode', {
+      alias: 'phm',
+      description: 'Pubic hair processing mode. Dynamic combines lengths into growth stages, Static treats each package separately, Both generates both types.',
+      type: 'string',
+      choices: ['dynamic', 'static', 'both'],
+      default: 'dynamic'
+  })
   .option('output', {
       alias: 'out',
       description: 'The directory where the generated XML file will be saved.',
@@ -146,6 +153,7 @@ function main() {
   console.log(`Configuration: Creator='${CREATOR_NAME}', Icon='${CAS_PART_ICON}'`);
   if (argv.subtype) console.log(`Subtype Override: '${argv.subtype}'`);
   if (argv.parttype) console.log(`Part Type Override: '${argv.parttype}'`);
+  if (argv['pubic-hair-mode']) console.log(`Pubic Hair Mode: '${argv['pubic-hair-mode']}'`);
   console.log(`Input Directory: '${INPUT_DIR}'`);
   console.log(`Output Directory: '${OUTPUT_DIR}'`);
 
@@ -174,7 +182,8 @@ function main() {
   
   // Check if this is pubic hair processing
   const isPubicHair = INPUT_DIR.toLowerCase().includes('pubic_hair') || packageFiles.some(f => f.toLowerCase().includes('pubic'));
-  console.log(`Pubic hair mode: ${isPubicHair ? 'Enabled' : 'Disabled'}`);
+  const pubicHairMode = argv['pubic-hair-mode'] || 'dynamic';
+  console.log(`Pubic hair mode: ${isPubicHair ? 'Enabled (' + pubicHairMode + ')' : 'Disabled'}`);
   
   // 3. Determine the Snippet Base Name
   let SNIPPET_BASE_NAME;
@@ -275,8 +284,8 @@ function main() {
   
   // 7. Create the list of CAS parts for the XML
   let casPartsListXml = '';
-  if (isPubicHair) {
-    // Process pubic hair grouping
+  if (isPubicHair && (pubicHairMode === 'dynamic' || pubicHairMode === 'both')) {
+    // DYNAMIC MODE: Process pubic hair grouping - combines lengths into growth stages
     const styleGroups = new Map(); // group -> color -> {short: id, medium: id, long: id}
     const groupToStyle = new Map(); // group -> style
 
@@ -341,7 +350,7 @@ function main() {
       });
     });
 
-    // Now, generate XML
+    // Now, generate XML for dynamic mode
     styleGroups.forEach((colorMap, group) => {
       const style = groupToStyle.get(group);
       colorMap.forEach((lengthsData, subtype) => {
@@ -353,7 +362,7 @@ function main() {
           return;
         }
         const ids = [shortId, mediumId, longId].filter(id => id !== null).join(',');
-        let displayName = `${style}${lengthsData.displaySuffix}`;
+        let displayName = `${style}${lengthsData.displaySuffix} Dynamic`;
         displayName = cleanDisplayName(displayName, CREATOR_NAME) + ' by ' + CREATOR_NAME;
 
         let partType = argv.parttype;
@@ -391,7 +400,88 @@ function main() {
 
       });
     });
-  } else {
+  }
+  
+  if (isPubicHair && (pubicHairMode === 'static' || pubicHairMode === 'both')) {
+    // STATIC MODE: Each package file generates its own entries with length in display name
+    casPartsData.forEach((parts, filename) => {
+      const base = path.basename(filename, '.package');
+      const creatorPattern = new RegExp(`\\s*by\\s*${CREATOR_NAME}\\s*`, 'i');
+      let withoutCreator = base.replace(creatorPattern, '').trim();
+      
+      // Find the length from filename
+      let detectedLength = '';
+      let style = withoutCreator;
+      PUBIC_HAIR_LENGTHS.forEach((len) => {
+        const lenPattern = new RegExp(`\\b${len}\\b`, 'i');
+        if (lenPattern.test(style)) {
+          detectedLength = len.charAt(0).toUpperCase() + len.slice(1).toLowerCase(); // Capitalize
+          style = style.replace(lenPattern, '').trim();
+        }
+      });
+      
+      parts.forEach(({id, name}) => {
+        // Extract color from name
+        let subtype = 'CUSTOM';
+        let displaySuffix = '';
+        let foundColor = null;
+        
+        for (const color of PUBIC_HAIR_COLORS) {
+          if (name.includes(`_${color}_`) || name.includes(`_${color}`)) {
+            foundColor = color;
+            subtype = color;
+            break;
+          }
+        }
+        
+        if (foundColor) {
+          const beautifiedColor = foundColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+          displaySuffix = ` ${beautifiedColor}`;
+        } else {
+          // Try to extract CUSTOM_COLOR pattern
+          const customColorMatch = name.match(/_CUSTOM_([A-Z_]+)/);
+          if (customColorMatch) {
+            const extractedColor = customColorMatch[1];
+            const beautifiedColor = extractedColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+            displaySuffix = ` ${beautifiedColor}`;
+          }
+        }
+        
+        const numberMatch = name.match(/_No_(\d+)/i);
+        const number = numberMatch ? numberMatch[1] : '';
+        
+        // Build display name with length and "Static" indicator
+        const lengthIndicator = detectedLength ? ` (${detectedLength})` : '';
+        let displayName = `${style}${displaySuffix}${lengthIndicator} Static`;
+        displayName = cleanDisplayName(displayName, CREATOR_NAME) + ' by ' + CREATOR_NAME;
+        
+        // Group name includes length for static mode
+        let group = (style.replace(/_/g, ' ') + (number ? ' No ' + number : '') + displaySuffix + lengthIndicator).trim();
+        
+        let partType = argv.parttype;
+        if (!partType) {
+          const hasMale = packageFiles.some(f => f.toLowerCase().includes('male'));
+          const hasFemale = packageFiles.some(f => f.toLowerCase().includes('female'));
+          partType = hasFemale && !hasMale ? 'PUBIC_HAIR_FEMALE' : 'PUBIC_HAIR_MALE';
+        }
+        
+        casPartsListXml += `
+    <!-- Color Tag: ${subtype} (${displaySuffix.trim()}) - Length: ${detectedLength || 'Unknown'} - Static Mode -->
+    <U>
+      <T n="cas_part_raw_display_name">${displayName}</T>
+      <T n="cas_part_author">${CREATOR_NAME}</T>
+      <T n="cas_part_display_icon">${CAS_PART_ICON}</T>
+      <T n="cas_part_type">${partType}</T>
+      <T n="cas_part_subtype">${subtype}</T>
+      <T n="cas_part_group">${group}</T>
+      <T n="cas_part_ids">${id}</T>
+      <T n="has_strict_visibility">True</T>
+    </U>`;
+      });
+    });
+  }
+  
+  if (!isPubicHair) {
     // Original logic for non-pubic hair
     const casPartsDataFlat = new Map();
     casPartsData.forEach((ids, filename) => {

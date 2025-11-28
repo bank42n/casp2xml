@@ -87,7 +87,13 @@ const OUTPUT_DIR = path.resolve(process.cwd(), argv.output);
 
 // Pubic hair constants
 const PUBIC_HAIR_LENGTHS = ['short', 'medium', 'long'];
-const PUBIC_HAIR_COLORS = ['BLACK', 'BLONDE', 'BROWN', 'LIGHT_BROWN', 'DARK_BROWN', 'AUBURN', 'RED', 'GRAY', 'WHITE', 'DIRTY_BLONDE', 'ORANGE'];
+const PUBIC_HAIR_COLORS = ['LIGHT_BROWN', 'DARK_BROWN', 'DIRTY_BLONDE', 'LIGHT_BLONDE', 'BLACK', 'BLONDE', 'BROWN', 'AUBURN', 'GRAY', 'ORANGE'];
+
+/**
+ * Available pubic hair colors:
+ * (GRAY, BLACK, LIGHT_BROWN, BROWN, BLONDE, DIRTY_BLONDE, AUBURN, ORANGE)
+ * Other then this is CUSTOM but should display Color in the name as well.
+*/  
 
 
 // --- SCRIPT LOGIC ---
@@ -207,8 +213,26 @@ function main() {
           try {
             const compressedBuffer = entry.value.bufferCache.buffer;
             const decompressed = zlib.inflateSync(compressedBuffer);
-            // Name is in UTF-16LE starting at offset 12
-            const name = decompressed.toString('utf16le', 12).split('\0')[0];
+            // Find the name by looking for creator name pattern in UTF-16LE
+            // The CASP structure varies, so we search for the name pattern instead of using fixed offset
+            // Use just the first 4 chars of creator name to handle case variations (e.g., BANK42n vs BANK42N)
+            const searchPattern = CREATOR_NAME.substring(0, 4).toUpperCase();
+            const creatorPattern = Buffer.from(searchPattern, 'utf16le');
+            const creatorIndex = decompressed.indexOf(creatorPattern);
+            let name = 'UNKNOWN';
+            if (creatorIndex !== -1) {
+              // Read from this position as UTF-16LE until null terminator
+              const nameBuffer = decompressed.slice(creatorIndex);
+              const nullIndex = nameBuffer.indexOf(Buffer.from('\0\0', 'binary'));
+              if (nullIndex !== -1 && nullIndex > 0) {
+                name = nameBuffer.slice(0, nullIndex).toString('utf16le');
+              } else {
+                name = nameBuffer.toString('utf16le').split('\0')[0];
+              }
+            } else {
+              // Fallback: try offset 12 method
+              name = decompressed.toString('utf16le', 12).split('\0')[0];
+            }
             parts.push({id, name});
           } catch (e) {
             console.error(`Failed to extract name for CASP ${id}: ${e.message}`);
@@ -275,25 +299,34 @@ function main() {
         return;
       }
       parts.forEach(({id, name}, idx) => {
-        // Extract color from name using regex _COLOR_[color] or _[color]_ followed by non-letter or end
-        const colorMatch = name.match(/.*_(?:COLOR_)?([A-Z_]+)([^A-Z]|$)/);
+        // Extract color from name - check for known colors first (longer ones first to match LIGHT_BROWN before BROWN)
         let subtype = 'CUSTOM';
         let displaySuffix = '';
-        if (colorMatch) {
-          const foundColor = colorMatch[1];
-          if (PUBIC_HAIR_COLORS.includes(foundColor)) {
-            subtype = foundColor;
-            const beautifiedColor = foundColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
-            displaySuffix = ` ${beautifiedColor}`;
-            } else {
-            subtype = 'CUSTOM';
-            const beautifiedColor = foundColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+        let foundColor = null;
+        
+        for (const color of PUBIC_HAIR_COLORS) {
+          if (name.includes(`_${color}_`) || name.includes(`_${color}`)) {
+            foundColor = color;
+            subtype = color;
+            break;
+          }
+        }
+        
+        if (foundColor) {
+          const beautifiedColor = foundColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+          displaySuffix = ` ${beautifiedColor}`;
+        } else {
+          // Try to extract CUSTOM_COLOR pattern (e.g., _CUSTOM_WHITE, _CUSTOM_PINK, _CUSTOM_BLUE, _CUSTOM_GREEN)
+          const customColorMatch = name.match(/_CUSTOM_([A-Z_]+)/);
+          if (customColorMatch) {
+            const extractedColor = customColorMatch[1];
+            const beautifiedColor = extractedColor.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
             displaySuffix = ` ${beautifiedColor}`;
           }
         }
         const numberMatch = name.match(/_No_(\d+)/i);
         const number = numberMatch ? numberMatch[1] : '';
-        let group = style.replace(/_/g, ' ') + (number ? ' No ' + number + displaySuffix : '');
+        let group = (style.replace(/_/g, ' ') + (number ? ' No ' + number : '') + displaySuffix).trim();
         if (!styleGroups.has(group)) {
           styleGroups.set(group, new Map());
         }
@@ -342,6 +375,20 @@ function main() {
       <T n="cas_part_ids">${ids}</T>
       <T n="has_strict_visibility">True</T>
     </U>`;
+
+    /* Exmple XML Structure for Pubic Hair:
+      <U>
+        <T n="cas_part_raw_display_name">Fancy Name Of The Pubic Hair Color And Style</T><!-- Raw Text for displayed CAS part name. Remove this field if using the "cas_part_display_name" field. -->
+        <T n="cas_part_author">YourName</T><!-- Raw Text for author name of this CAS part. -->
+        <T n="cas_part_display_icon">2F7D0004:00000000:D19DE7E9C0FA296B</T><!-- Resource Key for displayed CAS part icon. -->
+        <T n="cas_part_type">PUBIC_HAIR_MALE</T><!-- Type of the CAS part (STRAPON, CONDOM, UNDERWEAR_MALE, UNDERWEAR_FEMALE, TONGUE, BODY_TOP_MALE, BODY_TOP_FEMALE, BODY_BOTTOM_MALE, BODY_BOTTOM_FEMALE, BODY_FEET_MALE, BODY_FEET_FEMALE, PENIS_SOFT_MALE, PENIS_SOFT_FEMALE, PENIS_HARD_MALE, PENIS_HARD_FEMALE, PUBIC_HAIR_MALE, PUBIC_HAIR_FEMALE) -->
+        <T n="cas_part_subtype">GRAY</T><!--Secondary Type of the CAS part. For pubic hair, natural hair color. (GRAY, BLACK, LIGHT_BROWN, BROWN, BLONDE, DIRTY_BLONDE, AUBURN, ORANGE, CUSTOM)-->
+        <T n="cas_part_group">Fancy Name Of The Pubic Hair Style Group</T><!--Group Name of a collection of CAS parts.-->
+        <T n="cas_part_ids">1111111111111111111,2222222222222222222,3333333333333333333</T> <!-- Numerical IDs of the CAS parts. If more than one is provided, they come as hair growth stages respectively. -->
+        <T n="has_strict_visibility">False</T> <!-- Flags if part has a strict visibility rule. For pubic hair, set as 'True' when adding 3D pubic hair to prevent clipping. -->
+      </U>
+    */
+
       });
     });
   } else {
